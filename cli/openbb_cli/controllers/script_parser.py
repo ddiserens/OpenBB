@@ -2,14 +2,14 @@
 
 import re
 from datetime import datetime, timedelta
-from typing import Dict, List, Match, Optional, Tuple, Union
+from re import Match
 
 from dateutil.relativedelta import relativedelta
 from openbb_cli.session import Session
 
 session = Session()
 
-# pylint: disable=too-many-statements,eval-used,consider-iterating-dictionary
+# pylint: disable=too-many-statements,consider-iterating-dictionary
 # pylint: disable=too-many-branches,too-many-return-statements
 
 # Necessary for OpenBB keywords
@@ -54,11 +54,7 @@ def is_reset(command: str) -> bool:
     """
     if "reset" in command:
         return True
-    if command == "r":
-        return True
-    if command == "r\n":
-        return True
-    return False
+    return command in ("r", "r\n")
 
 
 def match_and_return_openbb_keyword_date(keyword: str) -> str:  # noqa: PLR0911
@@ -148,9 +144,9 @@ def match_and_return_openbb_keyword_date(keyword: str) -> str:  # noqa: PLR0911
 
 
 def parse_openbb_script(  # noqa: PLR0911,PLR0912
-    raw_lines: List[str],
-    script_inputs: Optional[List[str]] = None,
-) -> Tuple[str, str]:
+    raw_lines: list[str],
+    script_inputs: list[str] | None = None,
+) -> tuple[str, str]:
     """Parse .openbb script.
 
     Parameters
@@ -167,7 +163,7 @@ def parse_openbb_script(  # noqa: PLR0911,PLR0912
     str
         Processed string from .openbb script that can be run by the OpenBB Platform CLI
     """
-    ROUTINE_VARS: Dict[str, Union[str, List[str]]] = dict()
+    ROUTINE_VARS: dict[str, str | list[str]] = dict()
     if script_inputs:
         ROUTINE_VARS["$ARGV"] = script_inputs
 
@@ -237,7 +233,7 @@ def parse_openbb_script(  # noqa: PLR0911,PLR0912
             pattern = r"(?<!\$)(\$(\w+)(\[[^\]]*\])?)(?=(?:[^\]]*\]*))"
 
             # Find all matches of the pattern in the line
-            matches: Optional[List[Match[str]]] = re.findall(pattern, line)
+            matches: list[Match[str]] | None = re.findall(pattern, line)
 
             if matches:
                 for match in matches:
@@ -252,28 +248,23 @@ def parse_openbb_script(  # noqa: PLR0911,PLR0912
                             # in python will only take the first '2'
                             if VAR_SLICE == "0":
                                 if VAR_NAME in ROUTINE_VARS:
-                                    values = eval(  # noqa: S307
-                                        f'ROUTINE_VARS["{VAR_NAME}"]'
-                                    )
+                                    values = ROUTINE_VARS[VAR_NAME]
                                     if isinstance(values, list):
                                         templine = templine.replace(
                                             match[0],
-                                            eval(f"values[{VAR_SLICE}]"),  # noqa: S307
+                                            values[int(VAR_SLICE)],
                                         )
                                     else:
                                         templine = templine.replace(match[0], values)
                                 else:
                                     return (
-                                        f"[red]Variable {VAR_NAME} not given "
-                                        "for current routine script.[/red]",
+                                        f"[red]Variable {VAR_NAME} not given for current routine script.[/red]",
                                         "",
                                     )
 
                             # Only enters here when any other index from 0 is used
                             elif VAR_NAME in ROUTINE_VARS:
-                                variable = eval(  # noqa: S307
-                                    f'ROUTINE_VARS["{VAR_NAME}"]'
-                                )
+                                variable = ROUTINE_VARS[VAR_NAME]
                                 length_variable = (
                                     len(variable) if isinstance(variable, list) else 1
                                 )
@@ -305,23 +296,20 @@ def parse_openbb_script(  # noqa: PLR0911,PLR0912
                                 or VAR_SLICE.split(":")[1].isdigit()
                             )
                         ):
-                            slicing_tuple = "slice("
-                            slicing_tuple += (
-                                VAR_SLICE.split(":")[0]
-                                if VAR_SLICE.split(":")[0].isdigit()
-                                else "None"
+                            parts = VAR_SLICE.split(":")
+                            start = (
+                                int(parts[0])
+                                if parts[0] and parts[0].lstrip("-").isdigit()
+                                else None
                             )
-                            slicing_tuple += ","
-                            slicing_tuple += (
-                                VAR_SLICE.split(":")[1]
-                                if VAR_SLICE.split(":")[1].isdigit()
-                                else "None"
+                            stop = (
+                                int(parts[1])
+                                if len(parts) > 1
+                                and parts[1]
+                                and parts[1].lstrip("-").isdigit()
+                                else None
                             )
-                            slicing_tuple += ")"
-
-                            vars_to_loop = eval(  # noqa: S307
-                                f'ROUTINE_VARS["{VAR_NAME}"][{slicing_tuple}]'
-                            )
+                            vars_to_loop = ROUTINE_VARS[VAR_NAME][slice(start, stop)]
 
                             # Check whether the slicing was successful or not
                             if vars_to_loop:
@@ -357,9 +345,7 @@ def parse_openbb_script(  # noqa: PLR0911,PLR0912
                                     )
 
                             if VAR_NAME in ROUTINE_VARS:
-                                value = eval(  # noqa: S307
-                                    f'ROUTINE_VARS["{VAR_NAME}"]'
-                                )
+                                value = ROUTINE_VARS[VAR_NAME]
 
                                 # If the value is a list, we want to replace it with the whole list
                                 if isinstance(value, list):
@@ -383,8 +369,7 @@ def parse_openbb_script(  # noqa: PLR0911,PLR0912
                                     )
                                 else:
                                     return (
-                                        f"[red]Variable {VAR_NAME} not given for "
-                                        "current routine script.[/red]",
+                                        f"[red]Variable {VAR_NAME} not given for current routine script.[/red]",
                                         "",
                                     )
 
@@ -404,7 +389,7 @@ def parse_openbb_script(  # noqa: PLR0911,PLR0912
     # to be confident that the script has no clear issues.
 
     within_foreach = False
-    foreach_lines_loop: List[str] = list()
+    foreach_lines_loop: list[str] = list()
 
     parsed_script = ""
     final_lines = list()
@@ -448,8 +433,7 @@ def parse_openbb_script(  # noqa: PLR0911,PLR0912
 
                 if not varused_inside:
                     session.console.print(
-                        f"The variable {varname} was used in foreach header "
-                        "but it wasn't used inside the loop."
+                        f"The variable {varname} was used in foreach header but it wasn't used inside the loop."
                     )
                     varused_inside = False
 

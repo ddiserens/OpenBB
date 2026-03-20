@@ -2,7 +2,7 @@
 
 # pylint: disable=unused-argument
 
-from typing import Any, Optional
+from typing import Any
 
 from openbb_core.app.model.abstract.error import OpenBBError
 from openbb_core.provider.abstract.fetcher import Fetcher
@@ -10,6 +10,7 @@ from openbb_core.provider.standard_models.economic_calendar import (
     EconomicCalendarData,
     EconomicCalendarQueryParams,
 )
+from openbb_core.provider.utils.country_utils import Country
 from pydantic import Field, field_validator
 
 
@@ -26,16 +27,29 @@ class NasdaqEconomicCalendarQueryParams(EconomicCalendarQueryParams):
         }
     }
 
-    country: Optional[str] = Field(
+    country: str | None = Field(
         default=None,
-        description="Country of the event",
+        description="Country of the event. Accepts country names, "
+        "ISO 3166-1 alpha-2/alpha-3 codes. Multiple comma-separated values allowed.",
     )
 
     @field_validator("country", mode="before", check_fields=False)
     @classmethod
     def validate_country(cls, c: str):  # pylint: disable=E0213
-        """Validate country."""
-        return ",".join([v.lower() for v in c.replace(" ", "_").split(",")])
+        """Validate and normalize country input."""
+        if c is None:
+            return c
+        results = []
+        for item in c.split(","):
+            stripped = item.strip()
+            # Try to convert via Country type
+            try:
+                country = Country(stripped)
+                results.append(country.name.lower().replace(" ", "_"))
+            except ValueError:
+                # Keep original format (lowercase snake_case)
+                results.append(stripped.lower().replace(" ", "_"))
+        return ",".join(results)
 
 
 class NasdaqEconomicCalendarData(EconomicCalendarData):
@@ -44,7 +58,7 @@ class NasdaqEconomicCalendarData(EconomicCalendarData):
     __alias_dict__ = {
         "event": "eventName",
     }
-    description: Optional[str] = Field(default=None, description="Event description.")
+    description: str | None = Field(default=None, description="Event description.")
 
     @field_validator(
         "actual", "previous", "consensus", mode="before", check_fields=False
@@ -103,7 +117,7 @@ class NasdaqEconomicCalendarFetcher(
     @staticmethod
     async def aextract_data(
         query: NasdaqEconomicCalendarQueryParams,
-        credentials: Optional[dict[str, str]],
+        credentials: dict[str, str] | None,
         **kwargs: Any,
     ) -> list[dict]:
         """Return the raw data from the Nasdaq endpoint."""
