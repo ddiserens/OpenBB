@@ -1,51 +1,44 @@
 # ---- Base Python ----
 FROM python:3.11-slim-bullseye AS base
 
-# set work directory
 WORKDIR /openbb
 
-# set environment variables (Fixed legacy format)
+# Fix legacy ENV format
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# install dependencies
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential openssh-client curl \
+# Update pip and install system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    openssh-client \
+    curl \
+    && pip install --upgrade pip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# install toml and poetry
-RUN pip install toml poetry
-
-# ---- Copy Files/Build ----
+# ---- Build Stage ----
 FROM base AS builder
 
 WORKDIR /openbb
 
-# install Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends libwebkit2gtk-4.0-dev \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# add Rust to PATH (Fixed legacy format)
+# Install Rust for some of the wheel builds (like cryptography or specific providers)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-COPY ./openbb_platform ./openbb_platform
+# Install OpenBB and MCP directly from PyPI for stability
+# This bypasses the local version mismatch you encountered
+RUN pip install --no-cache-dir "openbb[all]" "openbb-mcp" "openbb-devtools"
 
-# Install the Platform and MCP server
-RUN pip install /openbb/openbb_platform[all]
-RUN pip install openbb-devtools openbb-mcp
-
-# ---- Final Stage ----
+# ---- Final Production Stage ----
 FROM base
 
-# Copy the installed packages from builder
+# Copy only the installed site-packages
 COPY --from=builder /usr/local /usr/local
 
-# Expose ports for both the API (8000) and potentially the MCP (if running as a service)
+# Create a config directory for your API keys
+RUN mkdir -p /root/.openbb_platform
+
 EXPOSE 8000
 
-# Launch the API by default
+# Default to REST API, but can be overridden in Talos/K8s to run MCP
 CMD ["uvicorn", "openbb_core.api.rest_api:app", "--host", "0.0.0.0", "--port", "8000"]
