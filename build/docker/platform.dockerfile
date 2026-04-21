@@ -5,6 +5,7 @@ WORKDIR /openbb
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# Install system dependencies & upgrade pip to avoid v26 warnings
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential openssh-client curl git \
     && pip install --upgrade pip \
@@ -15,32 +16,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 FROM base AS builder
 WORKDIR /openbb
 
-# Install Rust (needed for some provider dependencies)
+# Install Rust for dependency compilation
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Copy the forked repo files
+# Copy your forked v4.7.0 repository
 COPY . .
 
-# 1. Install the core Platform first
-RUN pip install ./openbb_platform[all]
+# 1. Install the core Platform (Avoid [all] to bypass the CFTC version bug)
+RUN pip install ./openbb_platform
 
-# 2. Install the MCP server from the local extensions directory
-# Adjust this path if your fork structure differs slightly
+# 2. Install essential providers for your QQQ options trading
+RUN pip install openbb-yfinance openbb-benzinga openbb-fmp openbb-fred
+
+# 3. Install the MCP Server component from the new 4.7.0 location
+# Note: In 4.7.0, this was refactored for better path handling
 RUN pip install ./openbb_platform/extensions/mcp
-
-RUN pip install openbb-devtools
 
 # ---- Final Production Stage ----
 FROM base
 COPY --from=builder /usr/local /usr/local
 WORKDIR /openbb
 
-# Copy necessary config files from your repo
+# Copy only the necessary platform files to keep the image slim
 COPY --from=builder /openbb/openbb_platform /openbb/openbb_platform
 
 EXPOSE 8000
+EXPOSE 8080
 
-# To run the MCP server alongside the API, we use the entry point provided by the extension
-# In your Talos/K8s manifest, you can override this CMD for the MCP container
+# Default to the API, but you can override this for MCP in your manifest
 CMD ["uvicorn", "openbb_core.api.rest_api:app", "--host", "0.0.0.0", "--port", "8000"]
