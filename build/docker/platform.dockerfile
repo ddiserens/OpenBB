@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Install OpenBB Platform + MCP Extension
-RUN pip install --no-cache-dir "openbb[all]" mcp
+RUN pip install --no-cache-dir --upgrade pip setuptools "openbb[all]>=4.7.0" openbb-mcp-server
 
 # This command starts the MCP server using the SSE (Server-Sent Events) transport
 # which is better for remote/containerized use than standard input/output.
