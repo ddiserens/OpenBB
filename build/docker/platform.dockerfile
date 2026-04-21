@@ -1,57 +1,47 @@
 # ---- Base Python ----
-FROM python:3.11-slim-bullseye AS base
+    FROM python:3.11-slim-bullseye AS base
 
-WORKDIR /openbb
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+    # set work directory
+    WORKDIR /openbb
 
-# Install system dependencies & upgrade pip
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential openssh-client curl git \
-    && pip install --upgrade pip \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    # set environment variables
+    ENV PYTHONDONTWRITEBYTECODE 1
+    ENV PYTHONUNBUFFERED 1
 
-# ---- Build Stage ----
-FROM base AS builder
-WORKDIR /openbb
+    # install dependencies
+    RUN apt-get update \
+        && apt-get install -y --no-install-recommends build-essential openssh-client curl \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*
 
-# Install Rust for dependency compilation (required for v4.7.0)
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
+    # install toml and poetry
+    RUN pip install toml poetry
 
-# Copy your forked v4.7.0 repository
-COPY . .
+    # ---- Copy Files/Build ----
+    FROM base AS builder
 
-# 1. Install the core Platform (Avoid [all] to bypass the CFTC version bug)
-RUN pip install ./openbb_platform
+    WORKDIR /openbb
 
-# 2. Install stable providers manually
-# Note: Polygon was removed in v4.7.0, so we use yfinance/fmp for options
-RUN pip install \
-    openbb-yfinance \
-    openbb-benzinga \
-    openbb-fmp \
-    openbb-fred \
-    openbb-sec
+    # install Rust
+    RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+        && apt-get update \
+        && apt-get install -y --no-install-recommends libwebkit2gtk-4.0-dev \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*
 
-# 3. Install the MCP Server component from source
-RUN pip install ./openbb_platform/extensions/mcp
+    # add Rust to PATH
+    ENV PATH="/root/.cargo/bin:${PATH}"
 
-# 4. CRITICAL: Rebuild static assets
-# This prevents the "ImportError: cannot import name OBBject_*" error
-RUN openbb-build
+    COPY ./openbb_platform ./openbb_platform
 
-# ---- Final Production Stage ----
-FROM base
-COPY --from=builder /usr/local /usr/local
-WORKDIR /openbb
+    # Install the Platform
+    RUN pip install /openbb/openbb_platform[all]
+    RUN pip install openbb-devtools
 
-# Copy necessary files from builder
-COPY --from=builder /openbb/openbb_platform /openbb/openbb_platform
+    # ---- Copy Files ----
+    FROM base
 
-EXPOSE 8000
-EXPOSE 8080
+    COPY --from=builder /usr/local /usr/local
 
-# Default to REST API
-CMD ["uvicorn", "openbb_core.api.rest_api:app", "--host", "0.0.0.0", "--port", "8000"]
+    # Launch the API
+    CMD ["uvicorn", "openbb_core.api.rest_api:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
